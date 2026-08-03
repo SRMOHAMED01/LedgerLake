@@ -1,0 +1,49 @@
+# ============================================================
+# docker-compose.yml — Orchestration complète LedgerLake
+# ============================================================
+# À COMPLÉTER (Palier G). Services attendus :
+#   - zookeeper + kafka       : broker d'événements (Palier A)
+#   - minio                    : data lake S3-compatible (Palier A)
+#   - spark-master + spark-worker : moteur de calcul (Palier B)
+#   - airflow-webserver + airflow-scheduler : orchestration (Palier E)
+#   - openmetadata + ses dépendances (elasticsearch, mysql) : gouvernance (Palier F)
+#   - prometheus + grafana       : observabilité (Palier G)
+#
+# Conseil : commence par zookeeper + kafka + minio (Palier A) uniquement,
+# ajoute les autres services au fur et à mesure des paliers suivants.
+
+version: "3.9"
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    env_file: .env
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+
+  # TODO Palier B : spark-master, spark-worker
+  # TODO Palier E : airflow-webserver, airflow-scheduler, postgres (metadata Airflow)
+  # TODO Palier F : openmetadata + elasticsearch + mysql
+  # TODO Palier G : prometheus, grafana
+
+volumes:
+  minio_data:

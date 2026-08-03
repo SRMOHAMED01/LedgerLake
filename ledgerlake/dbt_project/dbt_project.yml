@@ -1,0 +1,7 @@
+# dbt_project.yml — Configuration du projet dbt (Palier C.1)
+# À COMPLÉTER : name, version, profile (connexion DuckDB ou PostgreSQL
+# via ~/.dbt/profiles.yml), model-paths
+name: 'ledgerlake'
+version: '1.0.0'
+profile: 'ledgerlake'
+model-paths: ["models"]

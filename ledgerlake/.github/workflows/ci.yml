@@ -1,0 +1,27 @@
+# ============================================================
+# ci.yml — Pipeline CI/CD (Palier G.3)
+# ============================================================
+# À COMPLÉTER. Étapes attendues :
+#   1. Checkout du code
+#   2. Lint SQL des modèles dbt (sqlfluff)
+#   3. dbt run + dbt test (sur une base de test/CI)
+#   4. Lint Python (ruff) sur ingestion/ et spark_jobs/
+#   5. Build des images Docker
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # TODO: setup-python, ruff check ingestion/ spark_jobs/
+      # TODO: sqlfluff lint dbt_project/models
+      # TODO: dbt run --target ci && dbt test --target ci
+      - run: echo "TODO: implement lint + test steps"
