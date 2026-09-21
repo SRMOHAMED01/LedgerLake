@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ledgerlake.local/contracts/customer.v1.schema.json",
+  "title": "LedgerLake customer event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "event_type", "schema_version", "event_timestamp", "producer", "customer_id", "age", "country", "segment"],
+  "properties": {
+    "event_id": {"type": "string", "format": "uuid"},
+    "event_type": {"enum": ["ACCOUNT_CREATED", "PROFILE_UPDATED"]},
+    "schema_version": {"const": 1},
+    "event_timestamp": {"type": "string", "format": "date-time"},
+    "producer": {"const": "customer-producer"},
+    "customer_id": {"type": "string", "format": "uuid"},
+    "age": {"type": "integer", "minimum": 18, "maximum": 120},
+    "country": {"enum": ["MA", "Morocco", "Maroc", "FR", "France", "US", "USA"]},
+    "segment": {"enum": ["RETAIL", "PREMIUM", "BUSINESS"]}
+  }
+}

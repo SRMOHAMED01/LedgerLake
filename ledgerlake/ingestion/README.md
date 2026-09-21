@@ -3,6 +3,38 @@
 Simule les événements financiers d'une banque et les publie dans Kafka.
 Le bronze_writer.py consomme ces topics et écrit brut dans le data lake (bronze/).
 
+## Contrats et données liées
+
+Les contrats JSON Schema versionnés se trouvent dans `contracts/`. Les trois
+producers reconstruisent le même registre clients à partir de `EVENT_SEED` et
+`CUSTOMER_POPULATION`. Les transactions et crédits référencent donc des clients
+existants, et les mises à jour profil réutilisent leur identifiant.
+
+Chaque événement porte `event_id`, `event_type`, `schema_version`,
+`event_timestamp` et `producer`. Les événements valides sont vérifiés contre
+leur contrat avant publication. Les crédits suivent un cycle ordonné et gardent
+le même `loan_id`.
+
+Exemples de runs finis et reproductibles depuis la racine du dépôt :
+
+```bash
+python ledgerlake/ingestion/producers/customer_producer.py --count 2000 --customers 1000 --seed 42
+python ledgerlake/ingestion/producers/transaction_producer.py --count 5000 --customers 1000 --seed 42
+python ledgerlake/ingestion/producers/loan_producer.py --count 500 --customers 1000 --seed 42
+```
+
+`--count 0` conserve le mode continu. Le producer transactions accepte les
+scénarios `valid`, `duplicate`, `invalid-amount`, `missing-customer`,
+`late-event` et `conflicting-event`. Les deux scénarios invalides contournent
+volontairement la validation uniquement lorsqu'ils sont demandés explicitement.
+Ils servent aux tests de qualité en aval.
+
+Tests des contrats, relations, cycles et erreurs de publication :
+
+```bash
+python -B -m unittest ledgerlake/ingestion/tests/test_event_factory.py -v
+```
+
 ## Garanties du writer Bronze
 
 - Lots par topic et partition : 100 messages ou vidage toutes les 10 secondes.

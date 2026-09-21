@@ -1,66 +1,26 @@
-"""
-loan_producer.py — Simule des événements de crédit (Palier A.1)
+"""Publish deterministic, ordered loan lifecycles linked to customers."""
 
-À IMPLÉMENTER :
-  {
-    "loan_id": str,
-    "customer_id": str,
-    "amount": float,
-    "duration_months": int,
-    "status": "REQUESTED" | "APPROVED" | "REJECTED" | "REPAID" | "DEFAULTED",
-    "timestamp": ISO 8601
-  }
-Publié sur KAFKA_TOPIC_LOANS.
+import itertools
+import os
 
-(Palier H) pour fermer la boucle plateforme de données -> moteur de décision.
-"""
-import json
-import time
-import random
-import uuid
-from datetime import datetime
-from faker import Faker
-from confluent_kafka import Producer
+from event_factory import customer_registry, loan_lifecycle, parse_utc, producer_settings, publish
 
-# Configuration
-KAFKA_BROKER = "localhost:9092"
-KAFKA_TOPIC_LOANS = "loan-events"
 
-fake = Faker()
+def events(settings):
+    if settings.scenario != "valid":
+        raise ValueError("Loan producer currently supports only the valid scenario")
+    customers = customer_registry(settings.seed, settings.customers)
+    indexes = range(settings.count) if settings.count else itertools.count()
+    base_time = parse_utc(settings.base_time)
+    for index in indexes:
+        yield from loan_lifecycle(settings.seed, index, customers, base_time)
 
-def delivery_report(err, msg):
-    if err is not None:
-        print(f"Message delivery failed: {err}")
-    else:
-        print(f"Message delivered to {msg.topic()} [{msg.partition()}]")
 
-def generate_loan_event():
-    event = {
-        "loan_id": str(uuid.uuid4()),
-        "customer_id": fake.uuid4(),
-        "amount": round(random.uniform(5000.0, 500000.0), 2),
-        "duration_months": random.choice([12, 24, 36, 48, 60, 120, 240, 300]),
-        "status": random.choice(["REQUESTED", "APPROVED", "REJECTED", "REPAID", "DEFAULTED"]),
-        "timestamp": datetime.utcnow().isoformat() + "Z"
-    }
-    return event
+def main():
+    settings = producer_settings("Publish related LedgerLake loan lifecycles")
+    topic = os.getenv("KAFKA_TOPIC_LOANS", "loan-events")
+    print(f"Published {publish(topic, 'loan', events(settings), settings.interval)} loan events")
+
 
 if __name__ == "__main__":
-    producer = Producer({'bootstrap.servers': KAFKA_BROKER})
-    
-    print(f"Starting loan producer... Publishing to {KAFKA_TOPIC_LOANS}")
-    try:
-        while True:
-            event = generate_loan_event()
-            producer.produce(
-                KAFKA_TOPIC_LOANS,
-                key=event["loan_id"].encode('utf-8'),
-                value=json.dumps(event).encode('utf-8'),
-                callback=delivery_report
-            )
-            producer.poll(0)
-            time.sleep(random.uniform(2.0, 10.0)) # Encore moins fréquent
-    except KeyboardInterrupt:
-        print("\nStopping loan producer.")
-    finally:
-        producer.flush()
+    main()

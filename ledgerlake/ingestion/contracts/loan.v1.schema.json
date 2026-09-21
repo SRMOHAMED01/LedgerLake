@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ledgerlake.local/contracts/loan.v1.schema.json",
+  "title": "LedgerLake loan event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "event_type", "schema_version", "event_timestamp", "producer", "loan_id", "customer_id", "amount", "duration_months", "status", "timestamp"],
+  "properties": {
+    "event_id": {"type": "string", "format": "uuid"},
+    "event_type": {"enum": ["LOAN_REQUESTED", "LOAN_APPROVED", "LOAN_REJECTED", "LOAN_REPAID", "LOAN_DEFAULTED"]},
+    "schema_version": {"const": 1},
+    "event_timestamp": {"type": "string", "format": "date-time"},
+    "producer": {"const": "loan-producer"},
+    "loan_id": {"type": "string", "format": "uuid"},
+    "customer_id": {"type": "string", "format": "uuid"},
+    "amount": {"type": "number", "exclusiveMinimum": 0},
+    "duration_months": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["REQUESTED", "APPROVED", "REJECTED", "REPAID", "DEFAULTED"]},
+    "timestamp": {"type": "string", "format": "date-time"}
+  }
+}
