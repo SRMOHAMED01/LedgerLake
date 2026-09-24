@@ -1,0 +1,15 @@
+ledgerlake:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: 'ledgerlake.duckdb'
+      extensions:
+        - httpfs
+      settings:
+        s3_endpoint: 'localhost:9000'
+        s3_access_key_id: 'ledgerlake'
+        s3_secret_access_key: 'changeme'
+        s3_region: 'us-east-1'
+        s3_use_ssl: 'false'
+        s3_url_style: 'path'

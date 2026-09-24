@@ -163,6 +163,12 @@ class WriterTests(unittest.TestCase):
             writer_module.create_bucket_if_not_exists(self.s3, 'bronze')
         self.s3.create_bucket.assert_not_called()
 
+    def test_loan_topic_uses_documented_plural_path(self):
+        from datetime import datetime
+
+        key = writer_module.get_s3_key('loan-events', datetime(2026, 9, 21))
+        self.assertTrue(key.startswith('loans/year=2026/month=09/day=21/'))
+
     def test_missing_bucket_is_created(self):
         self.s3.head_bucket.side_effect = ClientError('404')
         writer_module.create_bucket_if_not_exists(self.s3, 'bronze')

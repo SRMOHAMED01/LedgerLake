@@ -1,5 +1,156 @@
-"""
-bronze_to_silver_loans.py — Nettoyage des événements de crédit (Palier B.1)
-À IMPLÉMENTER : même logique, adaptée aux colonnes loan (amount, duration_months,
-status). Valider que status appartient à un ensemble de valeurs acceptées.
-"""
+"""Build accepted and quarantined Silver loan events from complete Bronze history."""
+
+import os
+
+from dotenv import load_dotenv
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import (
+    col,
+    current_timestamp,
+    dayofmonth,
+    lit,
+    month,
+    trim,
+    when,
+    year,
+)
+from pyspark.sql.types import DecimalType, IntegerType, TimestampType
+
+
+load_dotenv()
+
+LOAN_COLUMNS = [
+    "event_id", "event_type", "schema_version", "event_timestamp", "producer",
+    "loan_id", "customer_id", "amount", "duration_months", "status",
+]
+ALLOWED_STATUSES = ("REQUESTED", "APPROVED", "REJECTED", "REPAID", "DEFAULTED")
+
+
+def get_spark_session():
+    return (
+        SparkSession.builder
+        .appName("bronze_to_silver_loans")
+        .master("local[*]")
+        .config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.4.1")
+        .config("spark.sql.session.timeZone", "UTC")
+        .config("spark.sql.sources.partitionOverwriteMode", "static")
+        .config("spark.hadoop.fs.s3a.endpoint", os.getenv("MINIO_ENDPOINT_HOST", "http://localhost:9000"))
+        .config("spark.hadoop.fs.s3a.access.key", os.getenv("MINIO_ROOT_USER", "ledgerlake"))
+        .config("spark.hadoop.fs.s3a.secret.key", os.getenv("MINIO_ROOT_PASSWORD", "changeme"))
+        .config("spark.hadoop.fs.s3a.path.style.access", "true")
+        .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+        .getOrCreate()
+    )
+
+
+def _require_columns(df):
+    missing = set(LOAN_COLUMNS) - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing loan columns: {sorted(missing)}")
+
+
+def classify_loans(df):
+    """Return accepted rows, rejected rows, and duplicate counts."""
+    _require_columns(df)
+    records = df.select(*LOAN_COLUMNS)
+    input_count = records.count()
+    unique = records.dropDuplicates(LOAN_COLUMNS).persist()
+    unique_count = unique.count()
+    exact_duplicates = input_count - unique_count
+
+    typed = (
+        unique
+        .withColumn("amount_decimal", col("amount").cast(DecimalType(18, 2)))
+        .withColumn("duration_int", col("duration_months").cast(IntegerType()))
+        .withColumn("event_time", col("event_timestamp").cast(TimestampType()))
+        .withColumn("schema_version_int", col("schema_version").cast(IntegerType()))
+    )
+    
+    conflict_ids = (
+        typed.groupBy("event_id").count()
+        .filter(col("event_id").isNotNull() & (col("count") > 1))
+        .select("event_id")
+        .withColumn("duplicate_conflict", lit(True))
+    )
+    
+    checked = typed.join(conflict_ids, "event_id", "left").withColumn(
+        "rejection_reason",
+        when(col("event_id").isNull() | (trim(col("event_id")) == ""), "MISSING_EVENT_ID")
+        .when(col("producer").isNull() | (col("producer") != "loan-producer"), "INVALID_PRODUCER")
+        .when(col("schema_version_int").isNull() | (col("schema_version_int") != 1), "UNSUPPORTED_SCHEMA_VERSION")
+        .when(col("event_time").isNull(), "INVALID_EVENT_TIMESTAMP")
+        .when(col("loan_id").isNull() | (trim(col("loan_id")) == ""), "MISSING_LOAN_ID")
+        .when(col("customer_id").isNull() | (trim(col("customer_id")) == ""), "MISSING_CUSTOMER_ID")
+        .when(col("amount_decimal").isNull(), "INVALID_AMOUNT_FORMAT")
+        .when(col("amount_decimal") <= 0, "NON_POSITIVE_AMOUNT")
+        .when(col("duration_int").isNull() | (col("duration_int") <= 0), "INVALID_DURATION")
+        .when(col("status").isNull() | ~col("status").isin(*ALLOWED_STATUSES), "INVALID_STATUS")
+        .when(col("duplicate_conflict") == True, "DUPLICATE_CONFLICT")
+    )
+
+    rejected = (
+        checked.filter(col("rejection_reason").isNotNull())
+        .drop("amount_decimal", "duration_int", "event_time", "schema_version_int", "duplicate_conflict")
+        .withColumn("rejected_at", current_timestamp())
+    )
+    
+    accepted = (
+        checked.filter(col("rejection_reason").isNull())
+        .drop("amount", "duration_months", "schema_version_int", "duplicate_conflict", "rejection_reason")
+        .withColumnRenamed("amount_decimal", "amount")
+        .withColumnRenamed("duration_int", "duration_months")
+        .withColumnRenamed("event_time", "event_timestamp")
+        .withColumn("year", year("event_timestamp"))
+        .withColumn("month", month("event_timestamp"))
+        .withColumn("day", dayofmonth("event_timestamp"))
+    )
+    return accepted, rejected, {"input": input_count, "exact_duplicates": exact_duplicates}, unique
+
+
+def rebuild_loans(spark, bronze_path, silver_path, rejected_path):
+    paths = {path.rstrip("/") for path in (bronze_path, silver_path, rejected_path)}
+    if len(paths) != 3:
+        raise ValueError("Bronze, Silver, and quarantine paths must be different")
+    raw = spark.read.option("mode", "FAILFAST").json(bronze_path)
+    if raw.isEmpty():
+        raise ValueError("Empty Bronze input; refusing to replace Silver")
+
+    accepted, rejected, metrics, cached = classify_loans(raw)
+    accepted = accepted.persist()
+    rejected = rejected.persist()
+    try:
+        metrics["accepted"] = accepted.count()
+        metrics["rejected"] = rejected.count()
+        if metrics["input"] != metrics["accepted"] + metrics["rejected"] + metrics["exact_duplicates"]:
+            raise RuntimeError(f"Loan reconciliation failed: {metrics}")
+        if metrics["accepted"] == 0:
+            raise ValueError(f"No accepted loans; Silver unchanged: {metrics}")
+        (
+            accepted.write.mode("overwrite")
+            .partitionBy("year", "month", "day")
+            .parquet(silver_path)
+        )
+        rejected.write.mode("overwrite").parquet(rejected_path)
+        return metrics
+    finally:
+        accepted.unpersist()
+        rejected.unpersist()
+        cached.unpersist()
+
+
+def process_loans():
+    spark = get_spark_session()
+    try:
+        metrics = rebuild_loans(
+            spark,
+            "s3a://bronze/loans/*/*/*/*.json",
+            "s3a://silver/loans/",
+            "s3a://silver-rejected/loans/",
+        )
+        print(f"Rebuilt Silver loans: {metrics}")
+    finally:
+        spark.stop()
+
+
+if __name__ == "__main__":
+    process_loans()

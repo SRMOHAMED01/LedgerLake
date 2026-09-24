@@ -63,6 +63,8 @@ def create_bucket_if_not_exists(s3_client, bucket_name):
 def get_s3_key(topic, current_time):
     # topic expected format: xxx-events -> extract xxx
     entity = topic.replace('-events', '')
+    if entity == "loan":
+        entity = "loans"
     year = current_time.strftime("%Y")
     month = current_time.strftime("%m")
     day = current_time.strftime("%d")

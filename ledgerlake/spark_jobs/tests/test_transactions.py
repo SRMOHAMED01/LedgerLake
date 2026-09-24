@@ -1,5 +1,7 @@
-"""Real Spark regression tests using local JSON/Parquet; no Kafka or MinIO."""
+"""Local Spark regression tests for accepted/quarantined transactions."""
+
 import json
+from decimal import Decimal
 from pathlib import Path
 import sys
 import tempfile
@@ -7,118 +9,145 @@ import unittest
 from unittest.mock import Mock, patch
 
 from pyspark.sql import SparkSession
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import bronze_to_silver_transactions as job
 
 
-def event(identifier='t1', amount=10.25, timestamp='2026-09-01T12:00:00Z'):
-    return dict(transaction_id=identifier, customer_id='c1', amount=amount,
-                currency='MAD', type='CARD_PAYMENT', merchant='Shop', country='MA',
-                timestamp=timestamp)
+def event(identifier="t1", amount=10.25, timestamp="2026-09-01T12:00:00Z", **changes):
+    value = {
+        "event_id": f"event-{identifier}",
+        "event_type": "TRANSACTION_CREATED",
+        "schema_version": 1,
+        "event_timestamp": timestamp,
+        "producer": "transaction-producer",
+        "transaction_id": identifier,
+        "customer_id": "c1",
+        "amount": amount,
+        "currency": "MAD",
+        "type": "CARD_PAYMENT",
+        "merchant": "Shop",
+        "country": "MA",
+        "timestamp": timestamp,
+    }
+    value.update(changes)
+    return value
 
 
 class SilverTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.spark = (SparkSession.builder.master('local[1]').appName('silver-regression')
-                     .config('spark.ui.enabled', 'false')
-                     .config('spark.sql.shuffle.partitions', '1')
-                     .config('spark.sql.session.timeZone', 'UTC').getOrCreate())
-        cls.spark.sparkContext.setLogLevel('ERROR')
+        cls.spark = (
+            SparkSession.builder.master("local[1]").appName("silver-transactions-test")
+            .config("spark.ui.enabled", "false")
+            .config("spark.sql.shuffle.partitions", "1")
+            .config("spark.sql.session.timeZone", "UTC").getOrCreate()
+        )
+        cls.spark.sparkContext.setLogLevel("ERROR")
 
     @classmethod
     def tearDownClass(cls):
         cls.spark.stop()
 
     def setUp(self):
-        self.directory = tempfile.TemporaryDirectory(prefix='ledgerlake-silver-')
+        self.directory = tempfile.TemporaryDirectory(prefix="ledgerlake-silver-")
         self.addCleanup(self.directory.cleanup)
-        self.root = Path(self.directory.name)
-        self.bronze = self.root / 'bronze'
+        root = Path(self.directory.name)
+        self.bronze = root / "bronze"
         self.bronze.mkdir()
-        self.silver = (self.root / 'silver').as_posix()
+        self.silver = (root / "silver").as_posix()
+        self.rejected = (root / "rejected").as_posix()
 
     def write(self, name, records):
-        (self.bronze / name).write_text('\n'.join(json.dumps(r) for r in records), encoding='utf-8')
+        (self.bronze / name).write_text("\n".join(json.dumps(row) for row in records), encoding="utf-8")
 
     def rebuild(self):
-        return job.rebuild_transactions(self.spark, self.bronze.as_posix(), self.silver)
+        return job.rebuild_transactions(
+            self.spark, self.bronze.as_posix(), self.silver, self.rejected
+        )
 
-    def totals(self):
-        df = self.spark.read.parquet(self.silver)
-        return df.count(), df.groupBy('currency').sum('amount').collect()[0]['sum(amount)']
+    def accepted(self):
+        return self.spark.read.parquet(self.silver)
 
-    def test_rerun_replay_and_late_arrival_preserve_counts_and_totals(self):
-        self.write('first.json', [event(), event('t2', 20.50)])
-        self.assertEqual(self.rebuild(), 2)
-        self.assertEqual(self.totals(), (2, 30.75))
-        self.assertEqual(self.rebuild(), 2)
-        self.assertEqual(self.totals(), (2, 30.75))
-        self.write('replay.json', [event(), event('t2', 20.50)])
-        self.assertEqual(self.rebuild(), 2)
-        self.assertEqual(self.totals(), (2, 30.75))
-        self.write('late.json', [event('t3', 5.25, '2026-08-01T12:00:00Z')])
-        self.assertEqual(self.rebuild(), 3)
-        self.assertEqual(self.totals(), (3, 36.0))
+    def quarantined(self):
+        return self.spark.read.parquet(self.rejected)
 
-    def test_existing_duplicates_are_repaired(self):
-        self.write('first.json', [event()])
+    def test_replay_and_rerun_are_idempotent_and_reconciled(self):
+        self.write("events.json", [event(), event(), event("t2", 20.50)])
+        expected = {"input": 3, "exact_duplicates": 1, "accepted": 2, "rejected": 0}
+        self.assertEqual(self.rebuild(), expected)
+        self.assertEqual(self.rebuild(), expected)
+        self.assertEqual(self.accepted().count(), 2)
+        total = self.accepted().groupBy().sum("amount").first()[0]
+        self.assertEqual(total, Decimal("30.75"))
+
+    def test_invalid_records_are_quarantined_with_reasons(self):
+        rows = [
+            event("good"),
+            event("bad-amount", -1),
+            event("bad-currency", currency="BTC"),
+            event("bad-customer", customer_id=None),
+            event("bad-time", timestamp="not-a-date"),
+        ]
+        self.write("events.json", rows)
+        metrics = self.rebuild()
+        self.assertEqual(metrics, {"input": 5, "exact_duplicates": 0, "accepted": 1, "rejected": 4})
+        reasons = {row.rejection_reason for row in self.quarantined().collect()}
+        self.assertEqual(reasons, {
+            "NON_POSITIVE_AMOUNT", "INVALID_CURRENCY", "MISSING_CUSTOMER_ID",
+            "INVALID_TRANSACTION_TIMESTAMP",
+        })
+
+    def test_conflicting_versions_are_quarantined(self):
+        self.write("events.json", [event("good"), event("conflict", 10), event("conflict", 20)])
+        metrics = self.rebuild()
+        self.assertEqual(metrics["accepted"], 1)
+        self.assertEqual(metrics["rejected"], 2)
+        self.assertEqual(
+            {row.rejection_reason for row in self.quarantined().collect()},
+            {"DUPLICATE_CONFLICT"},
+        )
+
+    def test_decimal_country_and_partition_transformation(self):
+        self.write("events.json", [event()])
         self.rebuild()
-        duplicate = job.transform_transactions(self.spark.read.json(self.bronze.as_posix()))
-        duplicate.write.mode('append').partitionBy('year', 'month', 'day').parquet(self.silver)
-        self.assertEqual(self.totals(), (2, 20.50))
+        row = self.accepted().first()
+        self.assertEqual(row.amount, Decimal("10.25"))
+        self.assertEqual((row.country, row.country_region), ("Morocco", "Africa"))
+        self.assertEqual((row.year, row.month, row.day), (2026, 9, 1))
+
+    def test_all_invalid_input_preserves_previous_silver(self):
+        self.write("events.json", [event()])
         self.rebuild()
-        self.assertEqual(self.totals(), (1, 10.25))
-
-    def test_conflict_fails_before_replacing_previous_output(self):
-        self.write('first.json', [event()])
-        self.rebuild()
-        self.write('conflict.json', [event(amount=999)])
-        with self.assertRaisesRegex(ValueError, 'Conflicting'):
+        self.write("events.json", [event("bad", -1)])
+        with self.assertRaisesRegex(ValueError, "No accepted"):
             self.rebuild()
-        self.assertEqual(self.totals(), (1, 10.25))
+        self.assertEqual(self.accepted().count(), 1)
 
-    def test_conflict_is_not_hidden_by_invalid_amount_filter(self):
-        self.write('first.json', [event(), event(amount=-1)])
-        with self.assertRaisesRegex(ValueError, 'Conflicting'):
+    def test_missing_contract_column_fails(self):
+        broken = event()
+        del broken["event_id"]
+        self.write("events.json", [broken])
+        with self.assertRaisesRegex(ValueError, "event_id"):
             self.rebuild()
-        self.assertFalse(Path(self.silver).exists())
-
-    def test_missing_id_rejected(self):
-        self.write('first.json', [event(identifier=None)])
-        with self.assertRaisesRegex(ValueError, 'transaction_id'):
-            self.rebuild()
-
-    def test_no_valid_rows_preserves_previous_output(self):
-        self.write('first.json', [event()])
-        self.rebuild()
-        self.write('first.json', [event(amount=-1)])
-        with self.assertRaisesRegex(ValueError, 'No accepted'):
-            self.rebuild()
-        self.assertEqual(self.totals(), (1, 10.25))
 
     def test_read_error_propagates(self):
         with self.assertRaises(Exception):
-            job.rebuild_transactions(self.spark, (self.root / 'missing').as_posix(), self.silver)
-        self.assertFalse(Path(self.silver).exists())
-
-    def test_transformation_and_partition_date(self):
-        self.write('first.json', [event(), event(), event('invalid', -2)])
-        rows = job.transform_transactions(self.spark.read.json(self.bronze.as_posix())).collect()
-        self.assertEqual(len(rows), 1)
-        self.assertEqual((rows[0].country, rows[0].country_region), ('Morocco', 'Africa'))
-        self.assertEqual((rows[0].year, rows[0].month, rows[0].day), (2026, 9, 1))
+            job.rebuild_transactions(
+                self.spark, (self.bronze / "missing").as_posix(), self.silver, self.rejected
+            )
 
 
 class LifecycleTests(unittest.TestCase):
     def test_session_stopped_when_rebuild_fails(self):
         spark = Mock()
-        with patch.object(job, 'get_spark_session', return_value=spark), \
-             patch.object(job, 'rebuild_transactions', side_effect=OSError('offline')):
+        with patch.object(job, "get_spark_session", return_value=spark), patch.object(
+            job, "rebuild_transactions", side_effect=OSError("offline")
+        ):
             with self.assertRaises(OSError):
                 job.process_transactions()
         spark.stop.assert_called_once()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
