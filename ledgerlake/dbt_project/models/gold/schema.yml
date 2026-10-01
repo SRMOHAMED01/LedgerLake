@@ -11,21 +11,94 @@ models:
           - not_null
       - name: age
         description: "Âge du client"
+        tests:
+          - not_null
+      - name: customer_segment
+        tests:
+          - not_null
+      - name: total_transactions
+        tests:
+          - not_null
+      - name: average_transaction
+        tests:
+          - not_null
+      - name: total_spent
+        tests:
+          - not_null
+      - name: active_loans_count
+        tests:
+          - not_null
+      - name: risk_level
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["High Risk", "Medium Risk", "Low Risk"]
       - name: credit_score
-        description: "Score de crédit calculé"
+        description: "Score de crédit illustratif calculé par règle métier"
+        tests:
+          - not_null
+
+  - name: customer_monthly_spending
+    description: "Dépenses et nombre de transactions par client et par mois"
+    columns:
+      - name: customer_id
+        tests:
+          - not_null
+      - name: spending_month
+        tests:
+          - not_null
+      - name: total_spending
+        tests:
+          - not_null
+      - name: number_transactions
+        tests:
+          - not_null
 
   - name: fraud_detection_metrics
-    description: "Métriques pour la détection de fraudes par client"
+    description: "Indicateurs heuristiques de fraude par client"
     columns:
       - name: customer_id
         tests:
           - unique
           - not_null
+      - name: number_transactions
+        tests:
+          - not_null
+      - name: suspicious_operations
+        tests:
+          - not_null
+      - name: fraud_score
+        description: "Score heuristique compris entre 0 et 100"
+        tests:
+          - not_null
 
   - name: loan_portfolio_analysis
-    description: "Analyse du portefeuille de prêts"
+    description: "Analyse du portefeuille de prêts; les probabilités sont illustratives"
     columns:
       - name: loan_id
         tests:
           - unique
           - not_null
+      - name: customer_id
+        tests:
+          - not_null
+      - name: loan_amount
+        tests:
+          - not_null
+      - name: duration_months
+        tests:
+          - not_null
+      - name: loan_status
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["REQUESTED", "APPROVED", "REJECTED", "REPAID", "DEFAULTED"]
+      - name: default_probability
+        description: "Probabilité de défaut heuristique comprise entre 0 et 1"
+        tests:
+          - not_null
+      - name: risk_category
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["Critical", "High", "Medium", "Low"]
