@@ -1,0 +1,31 @@
+version: 2
+
+models:
+  - name: customer_360
+    description: "Vue à 360° du profil client"
+    columns:
+      - name: customer_id
+        description: "L'identifiant unique du client"
+        tests:
+          - unique
+          - not_null
+      - name: age
+        description: "Âge du client"
+      - name: credit_score
+        description: "Score de crédit calculé"
+
+  - name: fraud_detection_metrics
+    description: "Métriques pour la détection de fraudes par client"
+    columns:
+      - name: customer_id
+        tests:
+          - unique
+          - not_null
+
+  - name: loan_portfolio_analysis
+    description: "Analyse du portefeuille de prêts"
+    columns:
+      - name: loan_id
+        tests:
+          - unique
+          - not_null

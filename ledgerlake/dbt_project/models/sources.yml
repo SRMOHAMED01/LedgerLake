@@ -1,0 +1,15 @@
+version: 2
+
+sources:
+  - name: silver
+    schema: main
+    tables:
+      - name: customers
+        meta:
+          external_location: "s3://silver/customers/*/*/*/*.parquet"
+      - name: transactions
+        meta:
+          external_location: "s3://silver/transactions/*/*/*/*.parquet"
+      - name: loans
+        meta:
+          external_location: "s3://silver/loans/*/*/*/*.parquet"

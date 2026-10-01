@@ -2,8 +2,8 @@
 
 select
     customer_id,
-    date_trunc('month', transaction_date) as month,
+    date_trunc('month', transaction_timestamp) as spending_month,
     sum(amount) as total_spending,
-    count(*) as number_transactions
-from {{ source('silver', 'transactions') }}
-group by customer_id, date_trunc('month', transaction_date)
+    count(transaction_id) as number_transactions
+from {{ ref('stg_transactions') }}
+group by customer_id, date_trunc('month', transaction_timestamp)
