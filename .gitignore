@@ -1,2 +1,5 @@
 ledgerlake/.env
 ledgerlake/.env
+
+__pycache__/
+*.pyc

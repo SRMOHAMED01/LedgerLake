@@ -62,10 +62,10 @@ class SilverCustomerTests(unittest.TestCase):
         )
 
     def accepted(self):
-        return self.spark.read.parquet(self.silver)
+        return self.spark.read.format("delta").load(self.silver)
 
     def quarantined(self):
-        return self.spark.read.parquet(self.rejected)
+        return self.spark.read.format("delta").load(self.rejected)
 
     def test_replay_and_rerun_are_idempotent_and_reconciled(self):
         self.write("events.json", [event(), event(), event("e2", age=45)])

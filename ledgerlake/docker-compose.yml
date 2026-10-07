@@ -44,10 +44,11 @@ services:
     volumes:
       - minio_data:/data
 
-  # TODO Palier B : spark-master, spark-worker
+  
   # TODO Palier E : airflow-webserver, airflow-scheduler, postgres (metadata Airflow)
   # TODO Palier F : openmetadata + elasticsearch + mysql
   # TODO Palier G : prometheus, grafana
 
 volumes:
   minio_data:
+

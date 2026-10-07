@@ -31,7 +31,9 @@ def get_spark_session():
         SparkSession.builder
         .appName("bronze_to_silver_loans")
         .master("local[*]")
-        .config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.4.1")
+        .config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.4.1,io.delta:delta-spark_2.12:3.2.0")
+        .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+        .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
         .config("spark.sql.session.timeZone", "UTC")
         .config("spark.sql.sources.partitionOverwriteMode", "static")
         .config("spark.hadoop.fs.s3a.endpoint", os.getenv("MINIO_ENDPOINT_HOST", "http://localhost:9000"))
@@ -128,9 +130,9 @@ def rebuild_loans(spark, bronze_path, silver_path, rejected_path):
         (
             accepted.write.mode("overwrite")
             .partitionBy("year", "month", "day")
-            .parquet(silver_path)
+            .format("delta").save(silver_path)
         )
-        rejected.write.mode("overwrite").parquet(rejected_path)
+        rejected.write.mode("overwrite").format("delta").save(rejected_path)
         return metrics
     finally:
         accepted.unpersist()
