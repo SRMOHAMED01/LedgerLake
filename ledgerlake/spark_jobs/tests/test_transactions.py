@@ -123,6 +123,7 @@ class SilverTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "No accepted"):
             self.rebuild()
         self.assertEqual(self.accepted().count(), 1)
+        self.assertEqual(self.quarantined().first().rejection_reason, "NON_POSITIVE_AMOUNT")
 
     def test_missing_contract_column_fails(self):
         broken = event()

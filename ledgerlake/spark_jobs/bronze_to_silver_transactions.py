@@ -107,7 +107,10 @@ def classify_transactions(df):
     )
     accepted = (
         checked.filter(col("rejection_reason").isNull())
-        .drop("amount", "timestamp", "schema_version_int", "duplicate_conflict", "rejection_reason")
+        .drop(
+            "amount", "timestamp", "event_timestamp", "schema_version_int",
+            "duplicate_conflict", "rejection_reason",
+        )
         .withColumnRenamed("amount_decimal", "amount")
         .withColumnRenamed("event_time", "event_timestamp")
         .withColumnRenamed("transaction_time", "timestamp")
@@ -155,6 +158,9 @@ def rebuild_transactions(spark, bronze_path, silver_path, rejected_path):
         metrics["rejected"] = rejected.count()
         if metrics["input"] != metrics["accepted"] + metrics["rejected"] + metrics["exact_duplicates"]:
             raise RuntimeError(f"Transaction reconciliation failed: {metrics}")
+        # Preserve invalid evidence even when every row is rejected. The
+        # accepted Silver dataset is replaced only after valid rows exist.
+        rejected.write.mode("overwrite").parquet(rejected_path)
         if metrics["accepted"] == 0:
             raise ValueError(f"No accepted transactions; Silver unchanged: {metrics}")
         (

@@ -23,6 +23,28 @@ L'overwrite Parquet n'est pas une transaction atomique. Pour une plateforme
 multi-writer ou de production, la prochaine évolution sera une table ACID
 (Iceberg, Delta ou Hudi) avec `MERGE` et snapshots.
 
+## Qualité Silver transactions
+
+Le job transactions classe maintenant chaque version unique dans l'un des deux
+jeux de données :
+
+- `s3a://silver/transactions/` : événements acceptés, montant en
+  `DecimalType(18,2)`, pays normalisé et partitions UTC ;
+- `s3a://silver-rejected/transactions/` : événement brut, raison principale et
+  date de rejet.
+
+Les replays strictement identiques sont comptés puis supprimés. Toutes les
+versions distinctes partageant un `transaction_id` sont mises en quarantaine
+avec `DUPLICATE_CONFLICT`. Chaque exécution impose l'égalité suivante :
+
+```text
+input = accepted + rejected + exact_duplicates
+```
+
+Une exécution sans aucune ligne acceptée met à jour la quarantaine mais conserve
+le Silver accepté précédent. Les erreurs de lecture, stockage ou réconciliation
+font échouer le job.
+
 ## Tests locaux
 
 Les régressions Spark couvrent le replay, le rerun, les doublons historiques,
