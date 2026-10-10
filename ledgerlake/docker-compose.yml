@@ -59,10 +59,137 @@ services:
         mc mb --ignore-existing local/silver-rejected
 
   
-  # TODO Palier E : airflow-webserver, airflow-scheduler, postgres (metadata Airflow)
-  # TODO Palier F : openmetadata + elasticsearch + mysql
+
+  spark-master:
+    image: bitnami/spark:3.5.0
+    environment:
+      - SPARK_MODE=master
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+
+  spark-worker:
+    image: bitnami/spark:3.5.0
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+    depends_on:
+      - spark-master
+
+  postgres-airflow:
+    image: postgres:13
+    environment:
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow
+    volumes:
+      - postgres-airflow-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  airflow-init:
+    image: apache/airflow:2.7.1
+    depends_on:
+      - postgres-airflow
+    environment:
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+    command: version
+    entrypoint: >
+      bash -c "airflow db init && airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.org"
+
+  airflow-webserver:
+    image: apache/airflow:2.7.1
+    depends_on:
+      - postgres-airflow
+      - airflow-init
+    environment:
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=false
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./spark_jobs:/opt/airflow/spark_jobs
+      - ./dbt_project:/opt/airflow/dbt_project
+    ports:
+      - "8081:8080"
+    command: webserver
+
+  airflow-scheduler:
+    image: apache/airflow:2.7.1
+    depends_on:
+      - postgres-airflow
+      - airflow-init
+    environment:
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=false
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./spark_jobs:/opt/airflow/spark_jobs
+      - ./dbt_project:/opt/airflow/dbt_project
+    command: scheduler
+
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.10.2
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+    ports:
+      - "9200:9200"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=openmetadata_password
+      - MYSQL_DATABASE=openmetadata_db
+      - MYSQL_USER=openmetadata_user
+      - MYSQL_PASSWORD=openmetadata_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysqldata:/var/lib/mysql
+
+  openmetadata-server:
+    image: getcollate/openmetadata-server:1.2.0
+    depends_on:
+      - elasticsearch
+      - mysql
+    environment:
+      - DB_DRIVER_CLASS=com.mysql.cj.jdbc.Driver
+      - DB_SCHEME=mysql
+      - DB_USE_SSL=false
+      - DB_USER=openmetadata_user
+      - DB_PASSWORD=openmetadata_password
+      - DB_USER_PASSWORD=openmetadata_password
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - AUTHORIZER_CLASS_NAME=org.openmetadata.service.security.DefaultAuthorizer
+      - AUTHORIZER_REQUEST_FILTER=org.openmetadata.service.security.JwtFilter
+      - AUTHORIZER_ADMIN_PRINCIPALS=admin
+      - AUTHORIZER_PRINCIPAL_DOMAIN=openmetadata.org
+      - AUTHENTICATION_PROVIDER=basic
+      - AUTHENTICATION_PUBLIC_KEYS=http://localhost:8585/api/v1/system/config/jwks
+      - AUTHENTICATION_AUTHORITY=https://accounts.google.com
+      - AUTHENTICATION_CLIENT_ID=
+      - AUTHENTICATION_CALLBACK_URL=
+      - ELASTICSEARCH_HOST=elasticsearch
+      - ELASTICSEARCH_PORT=9200
+      - ELASTICSEARCH_SCHEME=http
+      - ELASTICSEARCH_KEEP_ALIVE_TIMEOUT_SECS=600
+    ports:
+      - "8585:8585"
+
   # TODO Palier G : prometheus, grafana
 
 volumes:
   minio_data:
+  postgres-airflow-data:
+  esdata:
+  mysqldata:
+
 
