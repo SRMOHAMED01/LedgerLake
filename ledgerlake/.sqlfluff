@@ -1,0 +1,17 @@
+[sqlfluff]
+templater = dbt
+dialect = duckdb
+ignore_words = 
+ignore_files = 
+exclude_rules = L034,L009
+skip_file_analysis = false
+skip_templated_errors = false
+skip_non_templated_errors = false
+
+[sqlfluff:rules]
+allow_scalar = True
+capitalisation_policy = consistent
+indent_unit = space
+tab_space_size = 4
+max_line_length = 120
+single_table_references = consistent

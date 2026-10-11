@@ -14,6 +14,31 @@ def events(settings):
         yield transaction_event(settings.seed, index, customers, base_time, settings.scenario)
 
 
+def run_batch(count: int = 1000, seed: int = 20260921, customers: int = 1000,
+              base_time: str = "2026-01-01T00:00:00Z", scenario: str = "valid",
+              interval: float = 0.0) -> int:
+    """Run producer in batch mode, publishing `count` events."""
+    from event_factory import producer_settings
+    import argparse
+
+    # Create a mock settings object
+    class Settings:
+        pass
+
+    settings = Settings()
+    settings.count = count
+    settings.seed = seed
+    settings.customers = customers
+    settings.base_time = base_time
+    settings.scenario = scenario
+    settings.interval = interval
+
+    topic = os.getenv("KAFKA_TOPIC_TRANSACTIONS", "transactions-events")
+    intentional_invalid = scenario in ("invalid-amount", "missing-customer")
+    return publish(topic, 'transaction', events(settings), interval,
+                   validate=not intentional_invalid)
+
+
 def main():
     settings = producer_settings("Publish related LedgerLake transaction events")
     topic = os.getenv("KAFKA_TOPIC_TRANSACTIONS", "transactions-events")

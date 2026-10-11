@@ -1,15 +1,54 @@
 # prometheus.yml — Config de scraping (Palier G.1)
-# À COMPLÉTER : scrape_configs pointant vers les exporters de métriques
-# Kafka (kafka-exporter), Spark (metrics natifs), et Airflow
-# (statsd-exporter branché sur AIRFLOW__METRICS__STATSD_ON=True)
+# Scrape configs for basic service health checks
+# Note: Full metrics require additional exporters (jmx_exporter for Kafka, statsd-exporter for Airflow, etc.)
 
 global:
   scrape_interval: 15s
+  evaluation_interval: 15s
 
 scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Service health via HTTP endpoints (basic up/down)
   - job_name: 'kafka'
     static_configs:
-      - targets: ['kafka-exporter:9308']
-  - job_name: 'airflow'
+      - targets: ['kafka:9092']
+    metrics_path: /
+
+  - job_name: 'airflow-webserver'
     static_configs:
-      - targets: ['statsd-exporter:9102']
+      - targets: ['airflow-webserver:8080']
+    metrics_path: /health
+
+  - job_name: 'airflow-scheduler'
+    static_configs:
+      - targets: ['airflow-scheduler:8080']
+    metrics_path: /health
+
+  - job_name: 'spark-master'
+    static_configs:
+      - targets: ['spark-master:8080']
+    metrics_path: /
+
+  - job_name: 'spark-worker'
+    static_configs:
+      - targets: ['spark-worker:8080']
+    metrics_path: /
+
+  - job_name: 'minio'
+    static_configs:
+      - targets: ['minio:9000']
+    metrics_path: /minio/health/live
+
+  - job_name: 'openmetadata-server'
+    static_configs:
+      - targets: ['openmetadata-server:8585']
+    metrics_path: /health
+
+  # For full metrics, add these exporters:
+  # - jmx_exporter for Kafka (port 9404)
+  # - statsd-exporter for Airflow (port 9102) 
+  # - Prometheus JMX agent for Spark
+  # - node-exporter for system metrics (port 9100)

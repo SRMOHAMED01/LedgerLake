@@ -1,0 +1,310 @@
+{
+  "dashboard": {
+    "annotations": {
+      "list": [
+        {
+          "builtIn": 1,
+          "datasource": "-- Grafana --",
+          "enable": true,
+          "hide": true,
+          "iconColor": "rgba(0, 211, 255, 1)",
+          "name": "Annotations & Alerts",
+          "type": "dashboard"
+        }
+      ]
+    },
+    "editable": true,
+    "gnetId": null,
+    "graphTooltip": 0,
+    "id": 1,
+    "links": [],
+    "panels": [
+      {
+        "datasource": "Prometheus",
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "custom": {"lineWidth": 1},
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "red", "value": 80}
+              ]
+            },
+            "unit": "short"
+          },
+          "overrides": []
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "id": 1,
+        "options": {
+          "legend": {"calcs": [], "displayMode": "list", "placement": "bottom"},
+          "tooltip": {"mode": "single"}
+        },
+        "targets": [
+          {
+            "expr": "rate(kafka_server_brokertopicmetrics_messages_in_total[5m])",
+            "legendFormat": "{{topic}}",
+            "refId": "A"
+          }
+        ],
+        "title": "Kafka Messages In Rate (per topic)",
+        "type": "timeseries"
+      },
+      {
+        "datasource": "Prometheus",
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "custom": {"lineWidth": 1},
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null}
+              ]
+            },
+            "unit": "s"
+          },
+          "overrides": []
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "id": 2,
+        "options": {
+          "legend": {"calcs": [], "displayMode": "list", "placement": "bottom"},
+          "tooltip": {"mode": "single"}
+        },
+        "targets": [
+          {
+            "expr": "rate(airflow_task_execution_duration_seconds_sum[5m]) / rate(airflow_task_execution_duration_seconds_count[5m])",
+            "legendFormat": "{{dag_id}}.{{task_id}}",
+            "refId": "A"
+          }
+        ],
+        "title": "Airflow Task Duration (avg)",
+        "type": "timeseries"
+      },
+      {
+        "datasource": "Prometheus",
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "mappings": [
+              {"options": {"0": {"color": "red", "text": "Down"}, "1": {"color": "green", "text": "Up"}}, "type": "value"}
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 1}
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 8},
+        "id": 3,
+        "options": {
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "auto"
+        },
+        "targets": [
+          {
+            "expr": "up{job=\"kafka\"}",
+            "legendFormat": "Kafka",
+            "refId": "A"
+          }
+        ],
+        "title": "Kafka Status",
+        "type": "stat"
+      },
+      {
+        "datasource": "Prometheus",
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "mappings": [
+              {"options": {"0": {"color": "red", "text": "Down"}, "1": {"color": "green", "text": "Up"}}, "type": "value"}
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 1}
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 8},
+        "id": 4,
+        "options": {
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "auto"
+        },
+        "targets": [
+          {
+            "expr": "up{job=\"airflow\"}",
+            "legendFormat": "Airflow",
+            "refId": "A"
+          }
+        ],
+        "title": "Airflow Status",
+        "type": "stat"
+      },
+      {
+        "datasource": "Prometheus",
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "mappings": [
+              {"options": {"0": {"color": "red", "text": "Down"}, "1": {"color": "green", "text": "Up"}}, "type": "value"}
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 1}
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {"h": 4, "w": 6, "x": 12, "y": 8},
+        "id": 5,
+        "options": {
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "auto"
+        },
+        "targets": [
+          {
+            "expr": "up{job=\"spark-master\"}",
+            "legendFormat": "Spark Master",
+            "refId": "A"
+          }
+        ],
+        "title": "Spark Master Status",
+        "type": "stat"
+      },
+      {
+        "datasource": "Prometheus",
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "mappings": [
+              {"options": {"0": {"color": "red", "text": "Down"}, "1": {"color": "green", "text": "Up"}}, "type": "value"}
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 1}
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {"h": 4, "w": 6, "x": 18, "y": 8},
+        "id": 6,
+        "options": {
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "auto"
+        },
+        "targets": [
+          {
+            "expr": "up{job=\"minio\"}",
+            "legendFormat": "MinIO",
+            "refId": "A"
+          }
+        ],
+        "title": "MinIO Status",
+        "type": "stat"
+      },
+      {
+        "datasource": "Prometheus",
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "custom": {"lineWidth": 1},
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null}
+              ]
+            },
+            "unit": "ops"
+          },
+          "overrides": []
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+        "id": 7,
+        "options": {
+          "legend": {"calcs": [], "displayMode": "list", "placement": "bottom"},
+          "tooltip": {"mode": "single"}
+        },
+        "targets": [
+          {
+            "expr": "rate(airflow_dag_run_duration_seconds_sum[5m]) / rate(airflow_dag_run_duration_seconds_count[5m])",
+            "legendFormat": "{{dag_id}}",
+            "refId": "A"
+          }
+        ],
+        "title": "DAG Run Duration (avg)",
+        "type": "timeseries"
+      },
+      {
+        "datasource": "Prometheus",
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "custom": {"lineWidth": 1},
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null}
+              ]
+            },
+            "unit": "short"
+          },
+          "overrides": []
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+        "id": 8,
+        "options": {
+          "legend": {"calcs": ["lastNotNull"], "displayMode": "list", "placement": "bottom"},
+          "tooltip": {"mode": "single"}
+        },
+        "targets": [
+          {
+            "expr": "sum(rate(kafka_server_brokertopicmetrics_bytes_in_total[5m])) by (topic)",
+            "legendFormat": "{{topic}}",
+            "refId": "A"
+          }
+        ],
+        "title": "Kafka Bytes In Rate (per topic)",
+        "type": "timeseries"
+      }
+    ],
+    "refresh": "10s",
+    "schemaVersion": 38,
+    "style": "dark",
+    "tags": ["ledgerlake", "pipeline"],
+    "templating": {"list": []},
+    "time": {"from": "now-1h", "to": "now"},
+    "timepicker": {},
+    "timezone": "",
+    "title": "LedgerLake Pipeline Overview",
+    "uid": "ledgerlake-overview",
+    "version": 1,
+    "weekStart": ""
+  },
+  "overwrite": true
+}

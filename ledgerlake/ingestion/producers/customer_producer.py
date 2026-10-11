@@ -14,6 +14,27 @@ def events(settings):
         yield customer_event(settings.seed, index, customers, base_time)
 
 
+def run_batch(count: int = 1000, seed: int = 20260921, customers: int = 1000,
+              base_time: str = "2026-01-01T00:00:00Z", scenario: str = "valid",
+              interval: float = 0.0) -> int:
+    """Run producer in batch mode, publishing `count` events."""
+    class Settings:
+        pass
+
+    settings = Settings()
+    settings.count = count
+    settings.seed = seed
+    settings.customers = customers
+    settings.base_time = base_time
+    settings.scenario = scenario
+    settings.interval = interval
+
+    if scenario != "valid":
+        raise ValueError("Customer producer currently supports only the valid scenario")
+    topic = os.getenv("KAFKA_TOPIC_CUSTOMERS", "customers-events")
+    return publish(topic, 'customer', events(settings), interval)
+
+
 def main():
     settings = producer_settings("Publish related LedgerLake customer events")
     if settings.scenario != "valid":

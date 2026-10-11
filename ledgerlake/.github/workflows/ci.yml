@@ -1,12 +1,6 @@
 # ============================================================
 # ci.yml — Pipeline CI/CD (Palier G.3)
 # ============================================================
-# À COMPLÉTER. Étapes attendues :
-#   1. Checkout du code
-#   2. Lint SQL des modèles dbt (sqlfluff)
-#   3. dbt run + dbt test (sur une base de test/CI)
-#   4. Lint Python (ruff) sur ingestion/ et spark_jobs/
-#   5. Build des images Docker
 
 name: CI
 
@@ -16,12 +10,142 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  PROJECT_ROOT: ./ledgerlake
+  PYTHON_VERSION: '3.11'
+
 jobs:
-  lint-and-test:
+  lint-python:
+    name: Lint Python (ruff)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.PROJECT_ROOT }}
     steps:
       - uses: actions/checkout@v4
-      # TODO: setup-python, ruff check ingestion/ spark_jobs/
-      # TODO: sqlfluff lint dbt_project/models
-      # TODO: dbt run --target ci && dbt test --target ci
-      - run: echo "TODO: implement lint + test steps"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff
+
+      - name: Run ruff check
+        run: |
+          ruff check ingestion/ spark_jobs/ --output-format=github
+
+      - name: Run ruff format check
+        run: |
+          ruff format --check ingestion/ spark_jobs/
+
+  lint-sql:
+    name: Lint SQL (sqlfluff)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.PROJECT_ROOT }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install sqlfluff
+        run: |
+          pip install sqlfluff sqlfluff-templater-dbt
+
+      - name: Run sqlfluff lint
+        run: |
+          sqlfluff lint dbt_project/models --rules L001,L003,L004,L005,L006,L007,L009,L010,L014,L016,L019,L020,L023,L027,L029,L030,L031,L032,L033,L034,L036,L037,L039,L041,L042,L044,L045,L047,L048,L049,L050,L051,L052,L053,L054,L055,L056,L057,L058,L059,L060,L061,L062,L063,L064
+
+  dbt-test:
+    name: dbt run + test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.PROJECT_ROOT }}/dbt_project
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dbt-duckdb
+        run: |
+          pip install dbt-duckdb
+
+      - name: Create CI profile
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml << 'EOF'
+          ledgerlake:
+            outputs:
+              ci:
+                type: duckdb
+                path: /tmp/ledgerlake_ci.duckdb
+                schema: main
+                threads: 4
+            target: ci
+          EOF
+
+      - name: Install dbt dependencies
+        run: |
+          dbt deps --profiles-dir .
+
+      - name: dbt compile (validate SQL)
+        run: |
+          dbt compile --profiles-dir .
+
+      - name: dbt run
+        run: |
+          dbt run --profiles-dir .
+
+      - name: dbt test
+        run: |
+          dbt test --profiles-dir .
+
+  docker-build:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    needs: [lint-python, lint-sql, dbt-test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build base images
+        run: |
+          docker compose -f ledgerlake/docker-compose.yml build --parallel
+
+  spark-tests:
+    name: Spark Unit Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.PROJECT_ROOT }}/spark_jobs
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest delta-spark pytest-mock
+
+      - name: Run Spark tests
+        run: |
+          python -m pytest tests/ -v --tb=short

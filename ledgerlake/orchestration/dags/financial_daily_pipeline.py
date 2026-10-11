@@ -2,14 +2,15 @@
 financial_daily_pipeline.py — DAG Airflow principal (Palier E.1)
 
 DAG avec les tâches suivantes, dans l'ordre :
-1. run_bronze_writer - consomme Kafka et écrit en Bronze (batch mode)
-2. extract_and_validate_bronze - vérifie que les nouveaux fichiers Bronze du jour sont bien arrivés
-3. quality_check_bronze - exécute le checkpoint Great Expectations "bronze_to_silver"
-4. spark_bronze_to_silver_transactions/customers/loans - déclenche les 3 jobs Spark en parallèle
-5. quality_check_silver - checkpoint Great Expectations "silver_to_gold"
-6. dbt_run_gold - BashOperator qui lance `dbt run`
-7. dbt_test_gold - BashOperator qui lance `dbt test`
-8. notify_completion - log de succès/échec
+1. run_producers - publie les événements Kafka (transactions, customers, loans)
+2. run_bronze_writer - consomme Kafka et écrit en Bronze (batch mode)
+3. extract_and_validate_bronze - vérifie que les nouveaux fichiers Bronze du jour sont bien arrivés
+4. quality_check_bronze - exécute le checkpoint Great Expectations "bronze_to_silver"
+5. spark_bronze_to_silver_transactions/customers/loans - déclenche les 3 jobs Spark en parallèle
+6. quality_check_silver - checkpoint Great Expectations "silver_to_gold"
+7. dbt_run_gold - BashOperator qui lance `dbt run`
+8. dbt_test_gold - BashOperator qui lance `dbt test`
+9. notify_completion - log de succès/échec
 """
 
 from datetime import datetime, timedelta
@@ -49,6 +50,41 @@ with DAG(
     max_active_runs=1,
     tags=["ledgerlake", "financial", "daily"],
 ) as dag:
+
+    def run_producer_batch(producer_module: str, **context):
+        """Run a producer in batch mode."""
+        import os
+        import importlib
+        module = importlib.import_module(producer_module)
+        count = int(os.getenv(f"{producer_module.upper().replace('.', '_')}_COUNT", "1000"))
+        seed = int(os.getenv("EVENT_SEED", "20260921"))
+        customers = int(os.getenv("CUSTOMER_POPULATION", "1000"))
+        base_time = os.getenv("BASE_EVENT_TIME", "2026-01-01T00:00:00Z")
+        scenario = os.getenv("EVENT_SCENARIO", "valid")
+        interval = float(os.getenv("EVENT_INTERVAL_SECONDS", "0"))
+        published = module.run_batch(
+            count=count, seed=seed, customers=customers,
+            base_time=base_time, scenario=scenario, interval=interval
+        )
+        print(f"{producer_module} published {published} events")
+        return published
+
+    with TaskGroup("run_producers") as run_producers_group:
+        run_transaction_producer = PythonOperator(
+            task_id="run_transaction_producer",
+            python_callable=run_producer_batch,
+            op_kwargs={"producer_module": "producers.transaction_producer"},
+        )
+        run_customer_producer = PythonOperator(
+            task_id="run_customer_producer",
+            python_callable=run_producer_batch,
+            op_kwargs={"producer_module": "producers.customer_producer"},
+        )
+        run_loan_producer = PythonOperator(
+            task_id="run_loan_producer",
+            python_callable=run_producer_batch,
+            op_kwargs={"producer_module": "producers.loan_producer"},
+        )
 
     def run_bronze_writer(**context):
         """Run bronze writer in batch mode to consume Kafka and write to Bronze."""
@@ -203,4 +239,4 @@ with DAG(
         trigger_rule="all_done",
     )
 
-    run_bronze_writer_task >> extract_and_validate_bronze >> quality_check_bronze >> spark_bronze_to_silver >> quality_check_silver >> dbt_run_gold >> dbt_test_gold >> notify_completion
+    run_producers_group >> run_bronze_writer_task >> extract_and_validate_bronze >> quality_check_bronze >> spark_bronze_to_silver >> quality_check_silver >> dbt_run_gold >> dbt_test_gold >> notify_completion
