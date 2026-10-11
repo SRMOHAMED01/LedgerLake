@@ -2,17 +2,19 @@
 financial_daily_pipeline.py — DAG Airflow principal (Palier E.1)
 
 DAG avec les tâches suivantes, dans l'ordre :
-1. extract_and_validate_bronze - vérifie que les nouveaux fichiers Bronze du jour sont bien arrivés
-2. quality_check_bronze - exécute le checkpoint Great Expectations "bronze_to_silver"
-3. spark_bronze_to_silver_transactions/customers/loans - déclenche les 3 jobs Spark en parallèle
-4. quality_check_silver - checkpoint Great Expectations "silver_to_gold"
-5. dbt_run_gold - BashOperator qui lance `dbt run`
-6. dbt_test_gold - BashOperator qui lance `dbt test`
-7. notify_completion - log de succès/échec
+1. run_bronze_writer - consomme Kafka et écrit en Bronze (batch mode)
+2. extract_and_validate_bronze - vérifie que les nouveaux fichiers Bronze du jour sont bien arrivés
+3. quality_check_bronze - exécute le checkpoint Great Expectations "bronze_to_silver"
+4. spark_bronze_to_silver_transactions/customers/loans - déclenche les 3 jobs Spark en parallèle
+5. quality_check_silver - checkpoint Great Expectations "silver_to_gold"
+6. dbt_run_gold - BashOperator qui lance `dbt run`
+7. dbt_test_gold - BashOperator qui lance `dbt test`
+8. notify_completion - log de succès/échec
 """
 
 from datetime import datetime, timedelta
 from pathlib import Path
+import sys
 
 from airflow import DAG
 from airflow.operators.bash import BashOperator
@@ -23,6 +25,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SPARK_JOBS_DIR = PROJECT_ROOT / "spark_jobs"
 DBT_PROJECT_DIR = PROJECT_ROOT / "dbt_project"
 DATA_QUALITY_DIR = PROJECT_ROOT / "data_quality" / "great_expectations"
+INGESTION_DIR = PROJECT_ROOT / "ingestion"
+
+# Add ingestion to path for bronze_writer import
+sys.path.insert(0, str(INGESTION_DIR))
 
 DEFAULT_ARGS = {
     "owner": "data-engineering",
@@ -43,6 +49,21 @@ with DAG(
     max_active_runs=1,
     tags=["ledgerlake", "financial", "daily"],
 ) as dag:
+
+    def run_bronze_writer(**context):
+        """Run bronze writer in batch mode to consume Kafka and write to Bronze."""
+        import os
+        from bronze_writer import run_batch
+        max_messages = int(os.getenv("BRONZE_WRITER_MAX_MESSAGES", "1000"))
+        max_seconds = float(os.getenv("BRONZE_WRITER_MAX_SECONDS", "60"))
+        count = run_batch(max_messages=max_messages, max_seconds=max_seconds)
+        print(f"Bronze writer processed {count} messages")
+        return count
+
+    run_bronze_writer_task = PythonOperator(
+        task_id="run_bronze_writer",
+        python_callable=run_bronze_writer,
+    )
 
     def check_bronze_files(**context):
         """Vérifie la présence de nouveaux fichiers Bronze pour la date d'exécution."""
@@ -182,4 +203,4 @@ with DAG(
         trigger_rule="all_done",
     )
 
-    extract_and_validate_bronze >> quality_check_bronze >> spark_bronze_to_silver >> quality_check_silver >> dbt_run_gold >> dbt_test_gold >> notify_completion
+    run_bronze_writer_task >> extract_and_validate_bronze >> quality_check_bronze >> spark_bronze_to_silver >> quality_check_silver >> dbt_run_gold >> dbt_test_gold >> notify_completion

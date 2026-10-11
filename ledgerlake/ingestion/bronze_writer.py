@@ -176,5 +176,49 @@ def main():
     BronzeWriter(consumer, s3_client).run()
 
 
+def run_batch(max_messages: int = 1000, max_seconds: float = 60.0) -> int:
+    """Run bronze writer in batch mode: consume up to max_messages or max_seconds.
+    Returns number of messages written.
+    """
+    import time
+    s3_client = create_s3_client()
+    create_bucket_if_not_exists(s3_client, BRONZE_BUCKET)
+    consumer = Consumer({
+        'bootstrap.servers': KAFKA_BROKER,
+        'group.id': 'bronze_writer_batch',
+        'auto.offset.reset': 'earliest',
+        'enable.auto.commit': False,
+        'enable.auto.offset.store': False,
+    })
+    writer = BronzeWriter(consumer, s3_client)
+    try:
+        consumer.subscribe(
+            TOPICS,
+            on_revoke=writer.release_partitions,
+            on_lost=writer.release_partitions,
+        )
+        start = time.monotonic()
+        count = 0
+        while count < max_messages and (time.monotonic() - start) < max_seconds:
+            message = consumer.poll(timeout=1.0)
+            if message is not None:
+                if message.error():
+                    if message.error().code() != KafkaError._PARTITION_EOF:
+                        raise KafkaException(message.error())
+                else:
+                    key = writer.add(message)
+                    if len(writer.batches[key]) >= 100:
+                        batch_size = len(writer.batches[key])
+                        writer.flush(key)
+                        count += batch_size
+        # Flush any remaining messages
+        remaining = sum(len(msgs) for msgs in writer.batches.values())
+        writer.flush_all()
+        count += remaining
+        return count
+    finally:
+        consumer.close()
+
+
 if __name__ == '__main__':
     main()
