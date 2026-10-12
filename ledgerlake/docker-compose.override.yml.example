@@ -1,0 +1,141 @@
+# docker-compose.override.yml.example — Production overrides
+# Copy to docker-compose.override.yml and customize for production
+#
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.override.yml up -d
+
+services:
+  # Production: restrict ports to internal only
+  kafka:
+    ports: []
+
+  minio:
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+
+  postgres-airflow:
+    ports: []
+
+  airflow-webserver:
+    ports:
+      - "127.0.0.1:8081:8080"
+
+  elasticsearch:
+    ports: []
+
+  mysql:
+    ports: []
+
+  openmetadata-server:
+    ports:
+      - "127.0.0.1:8585:8585"
+
+  prometheus:
+    ports:
+      - "127.0.0.1:9090:9090"
+
+  grafana:
+    ports:
+      - "127.0.0.1:3000:3000"
+
+  # Production: increase resources
+  kafka:
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
+
+  spark-master:
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  spark-worker:
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
+
+  airflow-webserver:
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '2'
+          memory: 2G
+
+  airflow-scheduler:
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 3G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  openmetadata-server:
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 6G
+        reservations:
+          cpus: '2'
+          memory: 3G
+
+  elasticsearch:
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  # Production: enable security
+  elasticsearch:
+    environment:
+      - xpack.security.enabled=true
+      - xpack.security.transport.ssl.enabled=true
+
+  openmetadata-server:
+    environment:
+      - AUTHENTICATION_PROVIDER=oidc
+      - AUTHENTICATION_AUTHORITY=https://your-org.okta.com
+      - AUTHENTICATION_CLIENT_ID=your-client-id
+      - AUTHENTICATION_CALLBACK_URL=https://your-domain.com/callback
+
+  # Production: secrets from external secret manager
+  # mysql:
+  #   environment:
+  #     MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
+  #     MYSQL_PASSWORD_FILE: /run/secrets/mysql_password
+  # secrets:
+  #   mysql_root_password:
+  #     external: true
+  #   mysql_password:
+  #     external: true
+
+networks:
+  ledgerlake:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "true"
+      com.docker.network.bridge.enable_ip_masquerade: "true"

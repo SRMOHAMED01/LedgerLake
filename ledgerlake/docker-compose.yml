@@ -1,27 +1,48 @@
 # ============================================================
 # docker-compose.yml — Orchestration complète LedgerLake
 # ============================================================
-# À COMPLÉTER (Palier G). Services attendus :
-#   - zookeeper + kafka       : broker d'événements (Palier A)
-#   - minio                    : data lake S3-compatible (Palier A)
-#   - spark-master + spark-worker : moteur de calcul (Palier B)
-#   - airflow-webserver + airflow-scheduler : orchestration (Palier E)
-#   - openmetadata + ses dépendances (elasticsearch, mysql) : gouvernance (Palier F)
-#   - prometheus + grafana       : observabilité (Palier G)
+# Palier A: zookeeper + kafka + minio (event broker + data lake)
+# Palier B: spark-master + spark-worker (compute engine)
+# Palier E: airflow-webserver + airflow-scheduler (orchestration)
+# Palier F: openmetadata + elasticsearch + mysql (governance)
+# Palier G: prometheus + grafana (observability)
 #
-# Conseil : commence par zookeeper + kafka + minio (Palier A) uniquement,
-# ajoute les autres services au fur et à mesure des paliers suivants.
+# Networks: ledgerlake (internal), ledgerlake-external (host access)
+# Resource limits on all services for production stability
 
 services:
+  # ============================================================
+  # PALIER A — Event Broker & Data Lake
+  # ============================================================
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
+    container_name: ledgerlake-zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - ledgerlake
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   kafka:
     image: confluentinc/cp-kafka:7.5.0
+    container_name: ledgerlake-kafka
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     ports:
       - "9092:9092"
     environment:
@@ -35,14 +56,29 @@ services:
       KAFKA_DEFAULT_REPLICATION_FACTOR: 1
       KAFKA_JMX_PORT: 9999
       KAFKA_JMX_HOSTNAME: kafka
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+    networks:
+      - ledgerlake
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
     healthcheck:
       test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
       interval: 10s
       timeout: 10s
       retries: 5
+      start_period: 30s
 
   minio:
     image: quay.io/minio/minio
+    container_name: ledgerlake-minio
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -50,16 +86,29 @@ services:
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
+    networks:
+      - ledgerlake
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
       timeout: 20s
       retries: 3
+      start_period: 30s
 
   minio-init:
     image: quay.io/minio/mc
+    container_name: ledgerlake-minio-init
     depends_on:
-      - minio
+      minio:
+        condition: service_healthy
     env_file: .env
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -68,28 +117,77 @@ services:
         do sleep 2; done;
         mc mb --ignore-existing local/bronze;
         mc mb --ignore-existing local/silver;
-        mc mb --ignore-existing local/silver-rejected
+        mc mb --ignore-existing local/silver-rejected;
+        mc anonymous set download local/bronze;
+        mc anonymous set download local/silver;
+        mc anonymous set download local/silver-rejected
+    networks:
+      - ledgerlake
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
 
-  
-
+  # ============================================================
+  # PALIER B — Spark Cluster
+  # ============================================================
   spark-master:
     image: bitnami/spark:3.5.0
+    container_name: ledgerlake-spark-master
     environment:
       - SPARK_MODE=master
+      - SPARK_MASTER_WEBUI_PORT=8080
+      - SPARK_DAEMON_MEMORY=1g
     ports:
       - "8080:8080"
       - "7077:7077"
+    networks:
+      - ledgerlake
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   spark-worker:
     image: bitnami/spark:3.5.0
+    container_name: ledgerlake-spark-worker
     environment:
       - SPARK_MODE=worker
       - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=2g
+      - SPARK_WORKER_CORES=2
+      - SPARK_DAEMON_MEMORY=1g
     depends_on:
-      - spark-master
+      spark-master:
+        condition: service_healthy
+    networks:
+      - ledgerlake
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 3G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
 
+  # ============================================================
+  # PALIER E — Airflow
+  # ============================================================
   postgres-airflow:
     image: postgres:13
+    container_name: ledgerlake-postgres-airflow
     environment:
       - POSTGRES_USER=airflow
       - POSTGRES_PASSWORD=airflow
@@ -98,25 +196,46 @@ services:
       - postgres-airflow-data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    networks:
+      - ledgerlake
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U airflow"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
   airflow-init:
     image: apache/airflow:2.7.1
+    container_name: ledgerlake-airflow-init
     depends_on:
-      - postgres-airflow
+      postgres-airflow:
+        condition: service_healthy
     environment:
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
     command: version
     entrypoint: >
       bash -c "airflow db init && airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.org"
+    networks:
+      - ledgerlake
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
 
   airflow-webserver:
     image: apache/airflow:2.7.1
+    container_name: ledgerlake-airflow-webserver
     depends_on:
       postgres-airflow:
         condition: service_healthy
@@ -126,6 +245,8 @@ services:
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
+      - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=true
+      - AIRFLOW__WEBSERVER__SECRET_KEY=ledgerlake_secret_key_change_in_prod
       - DUCKDB_PATH=/tmp/duckdb/ledgerlake.duckdb
     volumes:
       - ./dags:/opt/airflow/dags
@@ -135,14 +256,27 @@ services:
     ports:
       - "8081:8080"
     command: webserver
+    networks:
+      - ledgerlake
+      - ledgerlake-external
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
     healthcheck:
       test: ["CMD-SHELL", "airflow db check"]
       interval: 30s
       timeout: 30s
       retries: 3
+      start_period: 60s
 
   airflow-scheduler:
     image: apache/airflow:2.7.1
+    container_name: ledgerlake-airflow-scheduler
     depends_on:
       postgres-airflow:
         condition: service_healthy
@@ -152,6 +286,7 @@ services:
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
+      - AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL=30
       - DUCKDB_PATH=/tmp/duckdb/ledgerlake.duckdb
     volumes:
       - ./dags:/opt/airflow/dags
@@ -159,26 +294,58 @@ services:
       - ./dbt_project:/opt/airflow/dbt_project
       - duckdb_data:/tmp/duckdb
     command: scheduler
+    networks:
+      - ledgerlake
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1.5G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
     healthcheck:
       test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname $$HOSTNAME"]
       interval: 30s
       timeout: 30s
       retries: 3
+      start_period: 60s
 
-
+  # ============================================================
+  # PALIER F — OpenMetadata (Governance)
+  # ============================================================
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.10.2
+    container_name: ledgerlake-elasticsearch
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
       - ES_JAVA_OPTS=-Xms1g -Xmx1g
+      - cluster.name=ledgerlake-es
     ports:
       - "9200:9200"
     volumes:
       - esdata:/usr/share/elasticsearch/data
+    networks:
+      - ledgerlake
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
 
   mysql:
     image: mysql:8.0
+    container_name: ledgerlake-mysql
     environment:
       - MYSQL_ROOT_PASSWORD=openmetadata_password
       - MYSQL_DATABASE=openmetadata_db
@@ -188,12 +355,31 @@ services:
       - "3306:3306"
     volumes:
       - mysqldata:/var/lib/mysql
+    networks:
+      - ledgerlake
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uopenmetadata_user -popenmetadata_password"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   openmetadata-server:
     image: getcollate/openmetadata-server:1.2.0
+    container_name: ledgerlake-openmetadata
     depends_on:
-      - elasticsearch
-      - mysql
+      elasticsearch:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
     environment:
       - DB_DRIVER_CLASS=com.mysql.cj.jdbc.Driver
       - DB_SCHEME=mysql
@@ -218,9 +404,30 @@ services:
       - ELASTICSEARCH_KEEP_ALIVE_TIMEOUT_SECS=600
     ports:
       - "8585:8585"
+    networks:
+      - ledgerlake
+      - ledgerlake-external
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 3G
+        reservations:
+          cpus: '1.0'
+          memory: 1.5G
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8585/api/v1/system/version || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
 
+  # ============================================================
+  # PALIER G — Observability
+  # ============================================================
   prometheus:
     image: prom/prometheus:v2.47.0
+    container_name: ledgerlake-prometheus
     ports:
       - "9090:9090"
     volumes:
@@ -229,12 +436,29 @@ services:
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
-    depends_on:
-      - kafka
-      - airflow-webserver
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    networks:
+      - ledgerlake
+      - ledgerlake-external
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9090/-/healthy || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   grafana:
     image: grafana/grafana:10.1.0
+    container_name: ledgerlake-grafana
     ports:
       - "3000:3000"
     volumes:
@@ -245,9 +469,42 @@ services:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
     depends_on:
       - prometheus
+    networks:
+      - ledgerlake
+      - ledgerlake-external
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
+# ============================================================
+# Networks
+# ============================================================
+networks:
+  ledgerlake:
+    name: ledgerlake-internal
+    driver: bridge
+    internal: false
+  ledgerlake-external:
+    name: ledgerlake-external
+    driver: bridge
+
+# ============================================================
+# Volumes
+# ============================================================
 volumes:
   minio_data:
   postgres-airflow-data:
@@ -256,5 +513,3 @@ volumes:
   prometheus_data:
   grafana_data:
   duckdb_data:
-
-
