@@ -1,0 +1,49 @@
+# OpenMetadata Ingestion Workflow for MinIO (Bronze/Silver layers)
+# Run with: python -m metadata.cmd.ingest --config governance/openmetadata-ingestion/minio-bronze-silver.yaml
+
+source:
+  type: "s3"
+  serviceName: "ledgerlake-minio"
+  serviceConnection:
+    config:
+      type: "S3"
+      # Use MinIO endpoint
+      endpointURL: "http://minio:9000"
+      awsAccessKeyId: "ledgerlake"
+      awsSecretAccessKey: "changeme"
+      awsRegion: "us-east-1"
+      verifySSL: false
+  sourceConfig:
+    config:
+      type: "FileMetadata"
+      # Process both bronze and silver buckets
+      path: "bronze/"
+      # Also process silver bucket
+      # Note: For multiple buckets, you'd run separate workflows or use a parent path
+      fileExtensions:
+        - ".json"
+        - ".parquet"
+      # Partition structure: entity/year=YYYY/month=MM/day=DD/
+      # OpenMetadata will infer schema from files
+      enableDebugLog: true
+
+processor:
+  type: "orm-profiler"
+  config:
+    # Profile sample of data
+    profileSample: 85.0
+    # Only profile numeric/date columns
+    profileColumns: []
+
+sink:
+  type: "metadata-rest"
+  config:
+    type: "metadata-rest"
+    # OpenMetadata server
+    metadataServer: "http://openmetadata-server:8585/api"
+    authProvider: "no-auth"
+
+workflowConfig:
+  openMetadataServerConfig:
+    hostPort: "http://openmetadata-server:8585/api"
+    authProvider: "no-auth"

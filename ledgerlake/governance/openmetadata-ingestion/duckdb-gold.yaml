@@ -1,0 +1,53 @@
+# OpenMetadata Ingestion Workflow for DuckDB (Gold Layer)
+# Run with: python -m metadata.cmd.ingest --config governance/openmetadata-ingestion/duckdb-gold.yaml
+# Note: Requires the DuckDB file to be accessible. In production, use PostgreSQL.
+
+source:
+  type: "duckdb"
+  serviceName: "ledgerlake-gold-duckdb"
+  serviceConnection:
+    config:
+      type: "DuckDB"
+      # Path to DuckDB file - shared volume mounted at /tmp/duckdb
+      database: "/tmp/duckdb/ledgerlake.duckdb"
+      # Or use MotherDuck if configured
+      # motherDuckToken: ""
+  sourceConfig:
+    config:
+      type: "DatabaseMetadata"
+      # Include gold schema tables
+      databaseFilterPattern:
+        includes:
+          - "main"
+      schemaFilterPattern:
+        includes:
+          - "main"
+      tableFilterPattern:
+        includes:
+          - "customer_360"
+          - "customer_monthly_spending"
+          - "fraud_detection_metrics"
+          - "loan_portfolio_analysis"
+      markDeletedTables: true
+      includeTables: true
+      includeViews: true
+      includeTags: true
+      enableDebugLog: true
+
+processor:
+  type: "orm-profiler"
+  config:
+    profileSample: 85.0
+    profileColumns: []
+
+sink:
+  type: "metadata-rest"
+  config:
+    type: "metadata-rest"
+    metadataServer: "http://openmetadata-server:8585/api"
+    authProvider: "no-auth"
+
+workflowConfig:
+  openMetadataServerConfig:
+    hostPort: "http://openmetadata-server:8585/api"
+    authProvider: "no-auth"

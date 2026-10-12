@@ -126,10 +126,12 @@ services:
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
+      - DUCKDB_PATH=/tmp/duckdb/ledgerlake.duckdb
     volumes:
       - ./dags:/opt/airflow/dags
       - ./spark_jobs:/opt/airflow/spark_jobs
       - ./dbt_project:/opt/airflow/dbt_project
+      - duckdb_data:/tmp/duckdb
     ports:
       - "8081:8080"
     command: webserver
@@ -150,10 +152,12 @@ services:
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
+      - DUCKDB_PATH=/tmp/duckdb/ledgerlake.duckdb
     volumes:
       - ./dags:/opt/airflow/dags
       - ./spark_jobs:/opt/airflow/spark_jobs
       - ./dbt_project:/opt/airflow/dbt_project
+      - duckdb_data:/tmp/duckdb
     command: scheduler
     healthcheck:
       test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname $$HOSTNAME"]
@@ -251,5 +255,6 @@ volumes:
   mysqldata:
   prometheus_data:
   grafana_data:
+  duckdb_data:
 
 

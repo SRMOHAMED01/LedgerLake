@@ -1,0 +1,48 @@
+# OpenMetadata Ingestion Workflow for Airflow (Lineage)
+# Run with: python -m metadata.cmd.ingest --config governance/openmetadata-ingestion/airflow-lineage.yaml
+# Captures DAG -> task lineage for pipeline visibility
+
+source:
+  type: "airflow"
+  serviceName: "ledgerlake-airflow"
+  serviceConnection:
+    config:
+      type: "Airflow"
+      # Airflow REST API endpoint
+      hostPort: "http://airflow-webserver:8080"
+      username: "admin"
+      password: "admin"
+      # Use API auth if available (Airflow 2.3+)
+      useAWSAuth: false
+  sourceConfig:
+    config:
+      type: "AirflowPipeline"
+      # Filter for our DAGs
+      pipelineFilterPattern:
+        includes:
+          - "financial_daily_pipeline"
+      # Include task details
+      includeTaskDetails: true
+      # Include upstream/downstream dependencies
+      includeUpstreamDownstream: true
+      # Start date for lineage (optional)
+      startDate: "2026-01-01"
+      enableDebugLog: true
+
+processor:
+  type: "airflow-lineage"
+  config:
+    # Process lineage from task instances
+    processLineage: true
+
+sink:
+  type: "metadata-rest"
+  config:
+    type: "metadata-rest"
+    metadataServer: "http://openmetadata-server:8585/api"
+    authProvider: "no-auth"
+
+workflowConfig:
+  openMetadataServerConfig:
+    hostPort: "http://openmetadata-server:8585/api"
+    authProvider: "no-auth"

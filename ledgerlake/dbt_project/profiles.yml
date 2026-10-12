@@ -3,7 +3,7 @@ ledgerlake:
   outputs:
     dev:
       type: duckdb
-      path: 'ledgerlake.duckdb'
+      path: '{{ env_var("DUCKDB_PATH", "ledgerlake.duckdb") }}'
       extensions:
         - httpfs
       settings:
