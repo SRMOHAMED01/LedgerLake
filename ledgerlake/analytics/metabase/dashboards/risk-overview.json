@@ -1,0 +1,89 @@
+{
+  "name": "LedgerLake Risk Overview",
+  "description": "Credit risk portfolio overview from LedgerLake Gold layer",
+  "parameters": [],
+  "cards": [
+    {
+      "name": "Total Loans",
+      "type": "question",
+      "visualization_settings": {
+        "graph.dimensions": ["loan_status"],
+        "graph.metrics": ["count"]
+      },
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT loan_status, COUNT(*) as count FROM loan_portfolio_analysis GROUP BY loan_status",
+          "template-tags": {}
+        },
+        "database": 1
+      }
+    },
+    {
+      "name": "Default Rate by Risk Category",
+      "type": "question",
+      "visualization_settings": {
+        "graph.dimensions": ["risk_category"],
+        "graph.metrics": ["default_rate"]
+      },
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT risk_category, AVG(CASE WHEN loan_status='DEFAULTED' THEN 1.0 ELSE 0.0 END) as default_rate FROM loan_portfolio_analysis GROUP BY risk_category",
+          "template-tags": {}
+        },
+        "database": 1
+      }
+    },
+    {
+      "name": "Portfolio Amount by Risk",
+      "type": "question",
+      "visualization_settings": {
+        "graph.dimensions": ["risk_category"],
+        "graph.metrics": ["total_amount"]
+      },
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT risk_category, SUM(loan_amount) as total_amount FROM loan_portfolio_analysis GROUP BY risk_category",
+          "template-tags": {}
+        },
+        "database": 1
+      }
+    },
+    {
+      "name": "Customer Risk Distribution",
+      "type": "question",
+      "visualization_settings": {
+        "graph.dimensions": ["risk_level"],
+        "graph.metrics": ["customer_count"]
+      },
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT risk_level, COUNT(*) as customer_count FROM customer_360 GROUP BY risk_level",
+          "template-tags": {}
+        },
+        "database": 1
+      }
+    },
+    {
+      "name": "Avg Credit Score by Segment",
+      "type": "question",
+      "visualization_settings": {
+        "graph.dimensions": ["customer_segment"],
+        "graph.metrics": ["avg_credit_score"]
+      },
+      "dataset_query": {
+        "type": "native",
+        "native": {
+          "query": "SELECT customer_segment, AVG(credit_score) as avg_credit_score FROM customer_360 GROUP BY customer_segment",
+          "template-tags": {}
+        },
+        "database": 1
+      }
+    }
+  ],
+  "dashboard_filters": [],
+  "public_uuid": "ledgerlake-risk-overview"
+}

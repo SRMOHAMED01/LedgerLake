@@ -11,6 +11,8 @@ DAG avec les tâches suivantes, dans l'ordre :
 7. dbt_run_gold - BashOperator qui lance `dbt run`
 8. dbt_test_gold - BashOperator qui lance `dbt test`
 9. notify_completion - log de succès/échec
+
+Schedule: @daily (catchup enabled for backfill)
 """
 
 from datetime import datetime, timedelta
@@ -21,6 +23,7 @@ from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
 from airflow.utils.task_group import TaskGroup
+from airflow.utils.dates import days_ago
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SPARK_JOBS_DIR = PROJECT_ROOT / "spark_jobs"
@@ -31,42 +34,59 @@ INGESTION_DIR = PROJECT_ROOT / "ingestion"
 # Add ingestion to path for bronze_writer import
 sys.path.insert(0, str(INGESTION_DIR))
 
+def sla_miss_callback(dag, task_list, blocking_task_list, slas, blocking_tis):
+    """Callback when SLA is missed - log for alerting."""
+    print(f"SLA MISSED for DAG: {dag.dag_id}")
+    for task in task_list:
+        print(f"  Task missed SLA: {task.task_id}")
+
 DEFAULT_ARGS = {
     "owner": "data-engineering",
     "depends_on_past": False,
     "retries": 1,
     "retry_delay": timedelta(minutes=5),
+    "retry_exponential_backoff": True,
+    "max_retry_delay": timedelta(minutes=30),
     "email_on_failure": False,
     "email_on_retry": False,
+    "sla": timedelta(hours=3),  # Expected to complete within 3 hours
+    "execution_timeout": timedelta(hours=4),
 }
 
 with DAG(
     dag_id="financial_daily_pipeline",
     description="Pipeline quotidien LedgerLake : Kafka → Bronze → Silver → Gold",
     default_args=DEFAULT_ARGS,
-    schedule_interval=None,
+    schedule_interval="@daily",
     start_date=datetime(2026, 1, 1),
-    catchup=False,
+    catchup=True,  # Enable backfill for historical runs
     max_active_runs=1,
+    max_active_tasks=8,
     tags=["ledgerlake", "financial", "daily"],
+    sla_miss_callback=sla_miss_callback,
+    render_template_as_native_obj=True,
 ) as dag:
 
     def run_producer_batch(producer_module: str, **context):
-        """Run a producer in batch mode."""
+        """Run a producer in batch mode for the execution date."""
         import os
         import importlib
         module = importlib.import_module(producer_module)
+        
+        # Use execution date for deterministic data generation
+        execution_date = context["data_interval_start"].in_timezone("UTC")
+        base_time = execution_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+        
         count = int(os.getenv(f"{producer_module.upper().replace('.', '_')}_COUNT", "1000"))
         seed = int(os.getenv("EVENT_SEED", "20260921"))
         customers = int(os.getenv("CUSTOMER_POPULATION", "1000"))
-        base_time = os.getenv("BASE_EVENT_TIME", "2026-01-01T00:00:00Z")
         scenario = os.getenv("EVENT_SCENARIO", "valid")
         interval = float(os.getenv("EVENT_INTERVAL_SECONDS", "0"))
         published = module.run_batch(
             count=count, seed=seed, customers=customers,
             base_time=base_time, scenario=scenario, interval=interval
         )
-        print(f"{producer_module} published {published} events")
+        print(f"{producer_module} published {published} events for {base_time}")
         return published
 
     with TaskGroup("run_producers") as run_producers_group:
@@ -137,6 +157,8 @@ with DAG(
                 print(f"Error checking {topic}: {e}")
 
         if not found_any:
+            # During backfill, this is expected if producers haven't run yet
+            # But in normal scheduled run, producers run just before this task
             raise ValueError(f"No Bronze files found for {year}-{month}-{day}")
         return True
 
