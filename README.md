@@ -1,42 +1,146 @@
-# LedgerLake
+# LedgerLake — Financial Data Lakehouse
 
-**Financial Data Lakehouse — de l'ingestion temps réel aux données métier gouvernées.**
+> **A production-grade financial data platform demonstrating end-to-end data engineering skills.**
 
-## 🎯 Le problème
+## What is LedgerLake?
 
-Une institution financière génère chaque jour des millions d'événements — transactions, paiements, virements, opérations de crédit — provenant de systèmes hétérogènes (core banking, gateway de paiement, mobile banking, CRM). Chaque système a son propre format, son propre schéma, sa propre fréquence. Sans plateforme unifiée, les équipes Risk, BI et Data Science travaillent chacune sur des données incohérentes, non gouvernées et difficiles à tracer.
+LedgerLake is a **Financial Data Lakehouse** following the **Medallion Architecture** (Bronze → Silver → Gold). It simulates a real financial institution's data platform: Kafka ingests events → Bronze stores raw → Spark cleans → dbt models business tables → Analytics/ML consumes.
 
-## 💡 La solution
+**Built to demonstrate:** Data engineering skills for interviews — architecture, streaming, distributed processing, analytics engineering, data quality, orchestration, governance, and observability.
 
-LedgerLake est un data lakehouse financier qui centralise, nettoie et structure ces données en suivant l'architecture **Medallion** (Bronze/Silver/Gold), aujourd'hui le standard des plateformes de données modernes :
+## Architecture
 
-- Les événements financiers sont ingérés en temps réel via **Kafka**, multi-topics (transactions, clients, crédits, fraude)
-- Ils sont stockés bruts et immuables en couche **Bronze** (data lake S3-compatible)
-- **Spark** les nettoie, déduplique, type et standardise en couche **Silver**
-- **dbt** transforme ces données propres en tables métier prêtes à l'emploi en couche **Gold** (`customer_360`, `loan_portfolio_analysis`, `fraud_detection_metrics`)
-- Chaque étape est validée par **Great Expectations**, orchestrée par **Airflow**, et cataloguée par **OpenMetadata** pour une traçabilité complète (data lineage)
+```
+Banking Systems → Kafka → Bronze (MinIO/S3) → Spark → Silver (Parquet)
+                                                    ↓
+                                              dbt → Gold (DuckDB)
+                                                    ↓
+                                           Analytics / CreditPulse ML
+    Transverse: Great Expectations (quality) | Airflow (orchestration)
+               OpenMetadata (governance) | Prometheus/Grafana (observability)
+```
 
-## 🏗️ Ce que le projet démontre
+## Tech Stack
 
-| Domaine | Compétences illustrées |
-|---|---|
-| **Architecture de données** | Medallion Architecture (Bronze/Silver/Gold), conception de lakehouse |
-| **Streaming & Ingestion** | Architecture event-driven multi-topics (Kafka), découplage des systèmes sources |
-| **Traitement distribué** | Transformation à l'échelle avec Apache Spark |
-| **Analytics Engineering** | Modélisation SQL versionnée et testée avec dbt |
-| **Data Quality** | Validation automatisée à chaque frontière de couche (Great Expectations) |
-| **Orchestration** | Pipelines complexes multi-étapes avec dépendances (Airflow) |
-| **Data Governance** | Catalogue de données, lignée, propriété des tables (OpenMetadata) |
-| **Finance** | Modélisation de cas d'usage réels : risque crédit, détection de fraude, analytics client |
+| Layer | Technology |
+|-------|------------|
+| Streaming | Apache Kafka |
+| Storage | MinIO (S3-compatible), Delta Lake |
+| Compute | Apache Spark (local mode) |
+| Transformation | dbt (DuckDB target) |
+| Quality | Great Expectations |
+| Orchestration | Apache Airflow |
+| Governance | OpenMetadata |
+| Observability | Prometheus + Grafana |
+| CI/CD | GitHub Actions |
+| Containerization | Docker Compose |
 
-## 🧱 Stack technique
+## Key Features
 
-`Apache Kafka` · `Apache Spark` · `MinIO (S3)` · `dbt` · `Apache Airflow` · `Great Expectations` · `OpenMetadata` · `Prometheus` · `Grafana` · `Docker`
+- **Event-driven ingestion** — 3 Kafka topics (transactions, customers, loans) with deterministic producers
+- **Medallion architecture** — Bronze (raw JSON) → Silver (clean Parquet) → Gold (business tables)
+- **Data quality gates** — Great Expectations at every layer boundary
+- **Delta Lake** — ACID transactions, time travel, schema evolution
+- **dbt models** — 4 Gold tables: `customer_360`, `loan_portfolio_analysis`, `fraud_detection_metrics`, `customer_monthly_spending`
+- **Airflow DAG** — Full pipeline orchestration with TaskGroups, SLA monitoring, backfill support
+- **OpenMetadata** — Data catalog + lineage (Kafka → Bronze → Silver → Gold)
+- **Prometheus/Grafana** — Service health dashboards
+- **CI/CD** — GitHub Actions: lint (ruff, sqlfluff), dbt test, Spark tests, Docker build
+- **E2E test** — 10-step integration test covering the full pipeline
 
-## 📐 Architecture
+## Quick Start
 
-Voir `docs/GUIDE_COMPLET.md` pour l'architecture détaillée et la méthodologie de construction en paliers.
+```bash
+# 1. Clone
+git clone https://github.com/SRMOHAMED01/LedgerLake.git
+cd LedgerLake
 
-## 🔗 Projet complémentaire
+# 2. Configure
+cp ledgerlake/.env.example ledgerlake/.env
 
-LedgerLake alimente en données propres et gouvernées le moteur de scoring crédit **CreditPulse**, formant ensemble une architecture complète de plateforme financière : *données → décision*.
+# 3. Start all services (16 containers)
+make up
+
+# 4. Verify
+make health
+
+# 5. Run pipeline
+make run-pipeline
+# Or trigger in Airflow UI: http://localhost:8081 (admin/admin)
+
+# 6. Run tests
+make test
+```
+
+## Access URLs
+
+| Service | URL | Credentials |
+|---------|-----|-------------|
+| Airflow | http://localhost:8081 | admin / admin |
+| MinIO Console | http://localhost:9001 | ledgerlake / changeme |
+| Spark Master | http://localhost:8080 | — |
+| Grafana | http://localhost:3000 | admin / admin |
+| Prometheus | http://localhost:9090 | — |
+| OpenMetadata | http://localhost:8585 | admin / admin |
+
+## Project Structure
+
+```
+LedgerLake/
+├── Makefile                    # make up/down/test/lint/health/ci
+├── README.md                   # This file
+└── ledgerlake/
+    ├── ingestion/              # Kafka producers + bronze_writer
+    │   ├── producers/          # 3 event producers (transactions, customers, loans)
+    │   ├── contracts/          # JSON schema validation
+    │   └── bronze_writer.py    # Kafka → MinIO consumer
+    ├── spark_jobs/             # Bronze → Silver (3 jobs, Delta Lake)
+    │   ├── bronze_to_silver_*.py
+    │   └── tests/              # 40+ unit tests
+    ├── dbt_project/            # Silver → Gold (dbt models)
+    │   ├── models/staging/     # 3 staging views
+    │   └── models/gold/        # 4 Gold tables
+    ├── data_quality/           # Great Expectations validation
+    ├── orchestration/dags/     # Airflow DAGs (daily + backfill)
+    ├── governance/             # OpenMetadata ingestion (4 connectors)
+    ├── observability/          # Prometheus + Grafana
+    ├── analytics/             # CreditPulse export, Metabase
+    ├── tests/integration/     # E2E pipeline test
+    ├── docker-compose.yml      # 16 services
+    ├── .github/workflows/     # CI/CD pipeline
+    └── .env.example           # Environment template
+```
+
+## What This Demonstrates
+
+| Skill | Evidence |
+|-------|----------|
+| **Data Architecture** | Medallion (Bronze/Silver/Gold), Delta Lake, S3-compatible storage |
+| **Streaming** | Event-driven Kafka, multi-topic, schema validation |
+| **Distributed Processing** | Apache Spark, local mode (same API as production cluster) |
+| **Analytics Engineering** | dbt models, tests, versioning, documentation |
+| **Data Quality** | Great Expectations at every layer boundary |
+| **Orchestration** | Airflow DAG with TaskGroups, SLA, backfill, retry logic |
+| **Governance** | OpenMetadata catalog + data lineage |
+| **Observability** | Prometheus/Grafana dashboards, health checks |
+| **CI/CD** | GitHub Actions: 5 jobs (lint, SQL lint, dbt test, Spark tests, Docker build) |
+| **Finance Domain** | Credit risk, fraud detection, customer analytics |
+
+## Interview Talking Points
+
+- "I built a complete financial data lakehouse from scratch, following Medallion architecture"
+- "Great Expectations at both layer boundaries — data doesn't progress if invalid"
+- "OpenMetadata for data lineage — full Kafka → Bronze → Silver → Gold traceability"
+- "Airflow DAG with TaskGroups, SLA monitoring (3h), and backfill capability"
+- "CI/CD with 5 jobs: Python lint, SQL lint, dbt test, Spark tests, Docker build"
+- "Prometheus/Grafana dashboards for pipeline health monitoring"
+- "Delta Lake for ACID guarantees and time travel on Silver layer"
+
+## License
+
+MIT
+
+---
+
+**Built by:** Mohamed SERRAR
+**GitHub:** https://github.com/SRMOHAMED01/LedgerLake

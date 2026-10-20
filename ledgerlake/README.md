@@ -1,39 +1,26 @@
 # LedgerLake — Financial Data Lakehouse
 
-Plateforme de données financières event-driven suivant l'architecture Medallion
-(Bronze/Silver/Gold) : Kafka → Bronze (raw) → Spark (Silver, clean) → dbt (Gold,
-métier) → Analytics/ML/BI. Gouvernée (OpenMetadata), testée en continu
-(Great Expectations), orchestrée (Airflow), monitorée (Prometheus/Grafana).
+See [root README](../README.md) for full documentation.
 
-## Structure du projet
-
-- `ingestion/`        → Producers Kafka (transactions, customers, loans)
-- `bronze/`             → Convention de stockage des données brutes (MinIO/S3)
-- `spark_jobs/`          → Jobs Spark Bronze → Silver
-- `silver/`               → Convention de stockage des données nettoyées (Parquet)
-- `dbt_project/`           → Modèles dbt Silver → Gold (tables métier)
-- `data_quality/`           → Suites Great Expectations
-- `orchestration/`            → DAGs Airflow
-- `governance/`                 → Config OpenMetadata (data lineage, catalog)
-- `observability/`                → Prometheus + Grafana
-- `analytics/`                       → Connexion BI / ML (dont CreditPulse)
-- `docs/GUIDE_COMPLET.md`              → Guide de construction détaillé, palier par palier
-
-## Comment démarrer
-
-Lis `docs/GUIDE_COMPLET.md` en premier — il explique l'ordre de construction
-(Palier A à H) et pourquoi cet ordre est important.
-
-## Démarrage rapide (une fois le code écrit)
+## Quick Start
 
 ```bash
 cp .env.example .env
-docker-compose up
+docker-compose up -d
 ```
 
-## Lien avec CreditPulse
+## Structure
 
-Ce projet et CreditPulse (moteur de scoring crédit) sont complémentaires :
-LedgerLake produit des données propres et gouvernées (`customer_360`,
-`loan_portfolio_analysis`) qui peuvent directement alimenter le modèle
-XGBoost de CreditPulse à la place de données simulées. Voir Palier H.
+- `ingestion/` → Kafka producers + bronze_writer
+- `spark_jobs/` → Bronze → Silver (Delta Lake)
+- `dbt_project/` → Silver → Gold (dbt + DuckDB)
+- `data_quality/` → Great Expectations
+- `orchestration/dags/` → Airflow DAGs
+- `governance/` → OpenMetadata connectors
+- `observability/` → Prometheus + Grafana
+- `analytics/` → CreditPulse export, Metabase
+
+## Full Documentation
+
+- [GUIDE_COMPLET.md](docs/GUIDE_COMPLET.md) — Step-by-step construction guide (Palier A → H)
+- [INTERVIEW_GUIDE.md](docs/INTERVIEW_GUIDE.md) — Interview preparation notes
